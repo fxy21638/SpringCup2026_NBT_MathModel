@@ -8,12 +8,16 @@
 - 子指数 = 分位数 × 100
 - 综合 AQI = max(子指数)，取值 0~100
 
-输出：program/data_with_aqi.csv
+输出：output/data_with_aqi.csv
 """
 
 import pandas as pd
 import numpy as np
 from pathlib import Path
+
+OUTPUT_DIR = Path('output')
+DATA_CLEAN_PATH = OUTPUT_DIR / 'data_clean.csv'
+DATA_WITH_AQI_PATH = OUTPUT_DIR / 'data_with_aqi.csv'
 
 # 参考污染物（移除 NMHC：90.2% 数据缺失，8126 小时连续缺口）
 POLLUTANTS = ['CO', 'C6H6', 'NOx', 'NO2']
@@ -60,7 +64,7 @@ def compute_expanding_percentile_aqi(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     print('加载清洗后数据...')
-    df = pd.read_csv('program/data_clean.csv')
+    df = pd.read_csv(DATA_CLEAN_PATH)
     df['Datetime'] = pd.to_datetime(df['Datetime'])
     print(f'数据形状: {df.shape}')
 
@@ -95,8 +99,9 @@ def main():
         print(f'  {pol}: {cnt} ({cnt/len(df)*100:.1f}%)')
 
     # 保存
-    df.to_csv('program/data_with_aqi.csv', index=False, encoding='utf-8-sig', float_format='%.6g')
-    print(f'\n已保存: program/data_with_aqi.csv')
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(DATA_WITH_AQI_PATH, index=False, encoding='utf-8-sig', float_format='%.6g')
+    print(f'\n已保存: {DATA_WITH_AQI_PATH}')
 
 
 if __name__ == '__main__':

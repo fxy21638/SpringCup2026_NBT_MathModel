@@ -3,12 +3,12 @@
 - 读取 Excel（默认路径：题目/B题附件：AirQualityUCI.xlsx）
 - 将 -200 替换为 NaN（缺失值），并进行插值填充
 - 合并 Date + Time 为 Datetime
-- 保存清洗后的 CSV 到 program/data_clean.csv
-- 输出缺失率表并保存为 program/missing_summary.csv
-- 生成缺失热图到 picture/
+- 保存清洗后的 CSV 到 output/data_clean.csv
+- 输出缺失率表并保存为 output/missing_summary.csv
+- 生成缺失热图到 output/picture/
 
 用法：
-python read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv program/data_clean.csv
+python read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
 """
 
 from pathlib import Path
@@ -21,8 +21,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 DEFAULT_INPUT = Path('题目/B题附件：AirQualityUCI.xlsx')
-DEFAULT_OUT = Path('program/data_clean.csv')
-PICTURE_DIR = Path('picture')
+OUTPUT_DIR = Path('output')
+DEFAULT_OUT = OUTPUT_DIR / 'data_clean.csv'
+PICTURE_DIR = OUTPUT_DIR / 'picture'
+MISSING_SUMMARY_OUT = OUTPUT_DIR / 'missing_summary.csv'
 
 # 目标列名（标准化后）
 TARGET_COLS = [
@@ -183,6 +185,7 @@ def main():
 
     inp = Path(args.input)
     out_csv = Path(args.out_csv)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     picture_dir = PICTURE_DIR
     picture_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,7 +208,7 @@ def main():
     print(f'Saved cleaned data to {out_csv}')
 
     # 缺失统计
-    missing_summary = save_missing_summary(df, Path('program/missing_summary.csv'))
+    missing_summary = save_missing_summary(df, MISSING_SUMMARY_OUT)
     print('Missing summary:')
     print(missing_summary)
 

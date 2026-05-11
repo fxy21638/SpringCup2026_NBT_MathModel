@@ -5,7 +5,7 @@
 问题2: 传感器→AQI 预测模型（XGBoost + TimeSeriesSplit）
 问题3: 基于特征重要性的改善建议
 
-输出图表：picture/ 目录下 8 张图
+输出图表：output/picture/ 目录下 8 张图
 """
 
 import pandas as pd
@@ -27,8 +27,12 @@ warnings.filterwarnings('ignore')
 matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
-PICTURE_DIR = Path('picture')
-PICTURE_DIR.mkdir(exist_ok=True)
+OUTPUT_DIR = Path('output')
+PICTURE_DIR = OUTPUT_DIR / 'picture'
+MODEL_PATH = OUTPUT_DIR / 'xgb_model.pkl'
+EVALUATION_PATH = OUTPUT_DIR / 'model_evaluation.csv'
+DATA_WITH_AQI_PATH = OUTPUT_DIR / 'data_with_aqi.csv'
+PICTURE_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============================================================
 # 0. 加载数据
@@ -37,7 +41,7 @@ print('=' * 60)
 print('空气质量综合评价与预测建模')
 print('=' * 60)
 
-df = pd.read_csv('program/data_with_aqi.csv')
+df = pd.read_csv(DATA_WITH_AQI_PATH)
 df['Datetime'] = pd.to_datetime(df['Datetime'])
 df = df.sort_values('Datetime').reset_index(drop=True)
 print(f'\n数据加载完成: {df.shape[0]} 条记录, {df.shape[1]} 列')
@@ -346,9 +350,9 @@ plt.close()
 print('  [图8] fold_evaluation.png')
 
 # 保存模型
-with open('program/xgb_model.pkl', 'wb') as f:
+with open(MODEL_PATH, 'wb') as f:
     pickle.dump(best_model, f)
-print('\n  已保存: program/xgb_model.pkl')
+print(f'\n  已保存: {MODEL_PATH}')
 
 # 保存模型评估结果
 eval_df = pd.DataFrame({
@@ -358,8 +362,8 @@ eval_df = pd.DataFrame({
     'RMSE': [lr_cv['RMSE'].mean(), xgb_cv['RMSE'].mean()],
     'MAE': [lr_cv['MAE'].mean(), xgb_cv['MAE'].mean()],
 })
-eval_df.to_csv('program/model_evaluation.csv', index=False, encoding='utf-8-sig')
-print('  已保存: program/model_evaluation.csv')
+eval_df.to_csv(EVALUATION_PATH, index=False, encoding='utf-8-sig')
+print(f'  已保存: {EVALUATION_PATH}')
 
 # ============================================================
 # 3. 问题3 — 改善建议
@@ -417,7 +421,7 @@ print(f'''
   - 对比线性回归 R^2 = {lr_cv["R2"].mean():.4f}
   - 特征数量: {len(feature_cols)} 个 ({len(sensor_cols)} 传感器 + {len(weather_cols)} 气象 + {len(time_feats)} 时间)
 
-生成图表 (picture/):
+生成图表 (output/picture/):
   1. aqi_distribution.png      — AQI 分布直方图
   2. aqi_grade_pie.png         — 污染等级饼图
   3. timeseries_aqi.png        — AQI 时间序列
@@ -428,6 +432,6 @@ print(f'''
   8. fold_evaluation.png       — 各折 R^2 对比
 
 输出文件:
-  - program/xgb_model.pkl       (训练好的模型)
-  - program/model_evaluation.csv (模型评估结果)
+  - output/xgb_model.pkl       (训练好的模型)
+  - output/model_evaluation.csv (模型评估结果)
 ''')

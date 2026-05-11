@@ -4,3 +4,10 @@ __pycache__/
 .DS_Store
 *.ipynb_checkpoints/
 ~$*
+output/
+picture/*.png
+program/data_clean.csv
+program/data_with_aqi.csv
+program/missing_summary.csv
+program/model_evaluation.csv
+program/xgb_model.pkl

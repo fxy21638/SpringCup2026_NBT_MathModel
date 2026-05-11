@@ -15,22 +15,23 @@ B题/
 ├── program/
 │   ├── read_and_clean.py                  # 步骤1: 数据清洗
 │   ├── compute_aqi.py                     # 步骤2: AQI 计算
-│   ├── analysis.py                        # 步骤3: 综合评价与预测建模
-│   ├── data_clean.csv                     # [生成] 清洗后数据
-│   ├── data_with_aqi.csv                  # [生成] 含 AQI 的数据
-│   ├── missing_summary.csv                # [生成] 缺失值统计
-│   ├── model_evaluation.csv               # [生成] 模型评估结果
-│   └── xgb_model.pkl                      # [生成] 训练好的 XGBoost 模型
-└── picture/
-    ├── missing_heatmap.png                # 缺失值热图
-    ├── aqi_distribution.png               # AQI 分布直方图
-    ├── aqi_grade_pie.png                  # 污染等级饼图
-    ├── timeseries_aqi.png                 # AQI 时间序列
-    ├── timeseries_pollutants.png          # 污染物浓度时序
-    ├── model_comparison.png               # 模型性能对比
-    ├── feature_importance.png             # 特征重要性
-    ├── timeseries_prediction.png          # 预测 vs 真实值
-    └── fold_evaluation.png                # 各折交叉验证结果
+│   └── analysis.py                        # 步骤3: 综合评价与预测建模
+└── output/                                # [生成] 统一输出目录（已加入 .gitignore）
+    ├── data_clean.csv                     # 清洗后数据
+    ├── data_with_aqi.csv                  # 含 AQI 的数据
+    ├── missing_summary.csv                # 缺失值统计
+    ├── model_evaluation.csv               # 模型评估结果
+    ├── xgb_model.pkl                      # 训练好的 XGBoost 模型
+    └── picture/
+        ├── missing_heatmap.png            # 缺失值热图
+        ├── aqi_distribution.png           # AQI 分布直方图
+        ├── aqi_grade_pie.png              # 污染等级饼图
+        ├── timeseries_aqi.png             # AQI 时间序列
+        ├── timeseries_pollutants.png      # 污染物浓度时序
+        ├── model_comparison.png           # 模型性能对比
+        ├── feature_importance.png         # 特征重要性
+        ├── timeseries_prediction.png      # 预测 vs 真实值
+        └── fold_evaluation.png            # 各折交叉验证结果
 ```
 
 ## 快速开始
@@ -40,7 +41,7 @@ B题/
 pip install -r requirements.txt
 
 # 步骤1: 数据清洗（-200 → NaN 并插值填充，合并 Date+Time）
-python program/read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv program/data_clean.csv
+python program/read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
 
 # 步骤2: 计算连续百分位 AQI
 python program/compute_aqi.py
