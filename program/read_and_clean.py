@@ -90,8 +90,34 @@ def build_datetime(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def fill_gap_aware(series: pd.Series, max_interp_gap: int = 6) -> pd.Series:
+    """
+    分段填充缺失值:
+    - gap <= max_interp_gap: 线性插值（传感器短暂掉线）
+    - gap >  max_interp_gap: 前向填充（传感器故障期，假设浓度不变）
+    """
+    s = series.copy()
+    is_na = s.isna()
+
+    # 标记连续 NaN 的运行编号
+    run_id = (is_na != is_na.shift()).cumsum()
+    na_runs = run_id[is_na]
+    run_sizes = na_runs.value_counts().to_dict()
+
+    # 短缺口：线性插值
+    short_run_ids = {k for k, v in run_sizes.items() if v <= max_interp_gap}
+    short_mask = is_na & run_id.isin(short_run_ids)
+    s[short_mask] = np.nan  # 保持 NaN 供插值使用
+    s = s.interpolate(method='linear', limit_direction='both', limit_area='inside')
+
+    # 长缺口：前向填充（然后后向填首部残留）
+    s = s.ffill().bfill()
+
+    return s
+
+
 def clean_values(df: pd.DataFrame, fill_method: str = 'interpolate') -> pd.DataFrame:
-    """将 -200 替换为 NaN 并插值填充"""
+    """将 -200 替换为 NaN 并按间隙长度分策略填充"""
     measure_cols = [
         'CO', 'PT08.S1_CO', 'NMHC', 'C6H6', 'PT08.S2_NMHC',
         'NOx', 'PT08.S3_NOx', 'NO2', 'PT08.S4_NO2', 'PT08.S5_O3',
@@ -111,9 +137,7 @@ def clean_values(df: pd.DataFrame, fill_method: str = 'interpolate') -> pd.DataF
     if fill_method == 'interpolate':
         for col in numeric_cols:
             if df[col].isna().any():
-                # 线性插值 + 前后填充作为兜底
-                df[col] = df[col].interpolate(method='linear', limit_direction='both')
-                df[col] = df[col].ffill().bfill()
+                df[col] = fill_gap_aware(df[col], max_interp_gap=6)
     elif fill_method == 'ffill':
         df[numeric_cols] = df[numeric_cols].ffill().bfill()
 
