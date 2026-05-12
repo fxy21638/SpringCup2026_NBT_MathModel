@@ -9,7 +9,7 @@
   * 长缺口（>6小时）：不参与 rank，子指数置 NaN 不纳入 max 计算
   * 此方案在有 NMHC 数据时段纳入评价，无数据时段基于其余4种污染物计算
 - 子指数 = 分位数 × 100
-- 综合 AQI = max(各子指数)，取值 0~100
+- 综合 AQI = 各子指数等权平均（多指标加权合成，NaN 自动排除后重新归一化），取值 0~100
 
 输出：output/data_with_aqi.csv
 """
@@ -105,9 +105,9 @@ def compute_expanding_percentile_aqi(df: pd.DataFrame, nmhc_long_gap_mask: np.nd
             expanding_rank = df[pol].expanding(min_periods=1).rank(pct=True)
             sub_indices[pol] = expanding_rank * 100
 
-    # 综合 AQI = max(子指数)
+    # 综合 AQI = 等权平均（多指标加权合成，NaN 自动排除）
     sub_df = pd.DataFrame(sub_indices)
-    df['AQI'] = sub_df.max(axis=1)
+    df['AQI'] = sub_df.mean(axis=1, skipna=True)
 
     # 保留各污染物子指数
     for pol in sub_indices:
@@ -156,13 +156,11 @@ def main():
     near_top = (df['AQI'] >= top_val * 0.99).sum()
     print(f'\n天花板检查: {near_top}/{len(df)} ({near_top/len(df)*100:.1f}%) 样本在 max 的 99% 以上')
 
-    # 主导污染物分析
+    # 各污染物贡献分析（子指数均值）
     sub_cols = [c for c in df.columns if c.startswith('AQI_') and c != 'AQI_等级']
-    sub_df = df[sub_cols]
-    dominant = sub_df.idxmax(axis=1).value_counts()
-    print(f'\n主导污染物频次:')
-    for pol, cnt in dominant.items():
-        print(f'  {pol}: {cnt} ({cnt/len(df)*100:.1f}%)')
+    print(f'\n各污染物子指数均值:')
+    for col in sub_cols:
+        print(f'  {col}: {df[col].mean():.2f}')
 
     # 保存
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

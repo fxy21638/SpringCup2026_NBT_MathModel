@@ -1,8 +1,8 @@
 """
 空气质量综合评价与预测建模 — 完整分析流水线。
 
-问题1: 基于连续百分位 AQI 的空气质量综合评价
-问题2: 传感器→AQI 预测模型（XGBoost + TimeSeriesSplit）
+问题1: 基于等权加权 AQI 的空气质量综合评价（多指标加权合成）
+问题2: 传感器→AQI 预测模型（XGBoost + TimeSeriesSplit，仅传感器+小时）
 问题3: 基于特征重要性的改善建议
 
 输出图表：output/picture/ 目录下 8 张图
@@ -148,25 +148,13 @@ print('\n' + '=' * 60)
 print('问题2: 传感器阵列预测 AQI 模型')
 print('=' * 60)
 
-# 构造特征
+# 构造特征（仅传感器测量值 + 简单小时，符合题目约束）
 sensor_cols = ['PT08.S1_CO', 'PT08.S2_NMHC', 'PT08.S3_NOx', 'PT08.S4_NO2', 'PT08.S5_O3']
-weather_cols = ['T', 'RH', 'AH']
 
-# 时间特征
+# 时间特征：仅使用小时（0-23），作为简单"随时间变化"表示
 df['hour'] = df['Datetime'].dt.hour
-df['day_of_week'] = df['Datetime'].dt.dayofweek
-df['month'] = df['Datetime'].dt.month
-df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
-df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
-df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
-df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
-df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
-df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
-df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
 
-time_feats = ['hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'month_sin', 'month_cos', 'is_weekend']
-
-feature_cols = [c for c in sensor_cols + weather_cols + time_feats if c in df.columns]
+feature_cols = [c for c in sensor_cols + ['hour'] if c in df.columns]
 print(f'\n特征列表 ({len(feature_cols)} 个):')
 for f in feature_cols:
     print(f'  {f}')
@@ -419,7 +407,7 @@ print(f'''
   - XGBoost R^2 = {xgb_cv["R2"].mean():.4f} +/- {xgb_cv["R2"].std():.4f}
   - XGBoost RMSE = {xgb_cv["RMSE"].mean():.2f} AQI 点
   - 对比线性回归 R^2 = {lr_cv["R2"].mean():.4f}
-  - 特征数量: {len(feature_cols)} 个 ({len(sensor_cols)} 传感器 + {len(weather_cols)} 气象 + {len(time_feats)} 时间)
+  - 特征数量: {len(feature_cols)} 个 ({len(sensor_cols)} 传感器 + 1 时间)
 
 生成图表 (output/picture/):
   1. aqi_distribution.png      — AQI 分布直方图
