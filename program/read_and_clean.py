@@ -1,11 +1,17 @@
 """
 读取并清洗 AirQualityUCI 数据的脚本。
 - 读取 Excel（默认路径：题目/B题附件：AirQualityUCI.xlsx）
-- 将 -200 替换为 NaN（缺失值），并进行插值填充
+- 将 -200 替换为 NaN（缺失值），并进行间隙感知填充
 - 合并 Date + Time 为 Datetime
 - 保存清洗后的 CSV 到 output/data_clean.csv
 - 输出缺失率表并保存为 output/missing_summary.csv
 - 生成缺失热图到 output/picture/
+
+异常值处理策略：
+  污染物浓度的高值属于真实污染事件，不视为统计"异常值"予以删除。
+  不采用 3σ 准则（正态假设不适用于偏态污染数据，会误删高污染时段）。
+  仅将 -200 标记为缺失值（仪器故障/未检出标识），替换为 NaN 后填充。
+  后续 AQI 计算采用非参数 expanding rank 方法，天然对极值鲁棒。
 
 用法：
 python read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
