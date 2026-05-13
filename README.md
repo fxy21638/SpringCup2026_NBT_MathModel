@@ -23,14 +23,21 @@ B题/
     ├── model_evaluation.csv               # 模型评估结果
     ├── xgb_model.pkl                      # 训练好的 XGBoost 模型
     └── picture/
-        ├── missing_heatmap.png            # 缺失值热图
+        ├── missing_heatmap.png            # 缺失值模式（柱状图 + 采样矩阵）
         ├── aqi_distribution.png           # AQI 分布直方图
         ├── aqi_grade_pie.png              # 污染等级饼图
-        ├── timeseries_aqi.png             # AQI 时间序列
-        ├── timeseries_pollutants.png      # 污染物浓度时序
+        ├── membership_functions.png       # 梯形隶属度函数曲线
+        ├── entropy_weights.png            # 熵权法权重柱状图
+        ├── timeseries_aqi.png             # AQI 时序（夏/冬代表性时段）
+        ├── timeseries_pollutants.png      # 污染物浓度时序（NMHC 真实值期）
+        ├── pollutant_correlation.png      # 污染物相关性热图
+        ├── monthly_aqi_boxplot.png        # AQI 月际箱线图
         ├── model_comparison.png           # 模型性能对比
         ├── feature_importance.png         # 特征重要性
-        ├── timeseries_prediction.png      # 预测 vs 真实值
+        ├── timeseries_prediction.png      # 预测 vs 真实值（夏/冬）
+        ├── residual_distribution.png      # 预测残差分布 + Q-Q 图
+        ├── sensor_correlation.png         # 传感器与 AQI 相关性
+        ├── diurnal_aqi.png                # AQI 日变化模式
         └── fold_evaluation.png            # 各折交叉验证结果
 ```
 

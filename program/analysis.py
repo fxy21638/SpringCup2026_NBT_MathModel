@@ -8,6 +8,7 @@
 输出图表：output/picture/ 目录下 8 张图
 """
 
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -80,7 +81,7 @@ fig, ax = plt.subplots(figsize=(10, 5))
 n, bins, patches = ax.hist(df['AQI'], bins=50, color='steelblue', alpha=0.85, edgecolor='white')
 
 # 按等级着色
-grade_colors = ['#2ecc71', '#27ae60', '#f39c12', '#e74c3c', '#8e44ad']
+grade_colors = ['#1a9850', '#91cf60', '#d9ef8b', '#fee08b', '#fc8d59']
 for i in range(len(bins) - 1):
     center = (bins[i] + bins[i + 1]) / 2
     for j, (lo, hi) in enumerate([(0, 20), (20, 40), (40, 60), (60, 80), (80, 100)]):
@@ -113,33 +114,167 @@ plt.savefig(PICTURE_DIR / 'aqi_grade_pie.png', dpi=120, bbox_inches='tight')
 plt.close()
 print('  [图2] aqi_grade_pie.png')
 
-# ---- 图3: AQI 时序图 ----
-fig, ax = plt.subplots(figsize=(14, 5))
-ax.plot(df['Datetime'], df['AQI'], color='#e74c3c', linewidth=0.6, alpha=0.9)
-ax.set_xlabel('时间', fontsize=11)
-ax.set_ylabel('AQI', fontsize=11)
-ax.set_title('AQI 时间序列', fontsize=14, fontweight='bold')
-ax.grid(alpha=0.2)
-fig.autofmt_xdate()
-plt.tight_layout()
-plt.savefig(PICTURE_DIR / 'timeseries_aqi.png', dpi=120, bbox_inches='tight')
-plt.close()
-print('  [图3] timeseries_aqi.png')
+# ---- 图2.5a: 梯形隶属度函数可视化 ----
+sys.path.insert(0, str(Path(__file__).parent))
+from compute_aqi import build_membership_breakpoints, trapezoid_membership, POLLUTANTS as FCE_POLLUTANTS, GRADE_NAMES as FCE_GRADES
 
-# ---- 图4: 污染物时序图 ----
-fig, axes = plt.subplots(5, 1, figsize=(14, 14), sharex=True)
-for i, pol in enumerate(pollutants):
-    if pol in df.columns:
-        axes[i].plot(df['Datetime'], df[pol], linewidth=0.5, alpha=0.85, color=f'C{i}')
-        axes[i].set_ylabel(pol, fontsize=10)
-        axes[i].grid(alpha=0.2)
-axes[0].set_title('参考污染物浓度时间序列', fontsize=14, fontweight='bold')
+bp = build_membership_breakpoints(df)
+fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+axes = axes.flatten()
+for idx, pol in enumerate(FCE_POLLUTANTS):
+    ax = axes[idx]
+    if pol not in bp:
+        continue
+    x_vals = np.linspace(df[pol].min(), df[pol].max(), 500)
+    grade_colors_fce = ['#1a9850', '#91cf60', '#d9ef8b', '#fee08b', '#fc8d59']
+    for k, gname in enumerate(FCE_GRADES):
+        a, b, c, d = bp[pol][k]
+        y = trapezoid_membership(x_vals, a, b, c, d)
+        ax.plot(x_vals, y, linewidth=1.8, color=grade_colors_fce[k], label=gname)
+        ax.fill_between(x_vals, 0, y, color=grade_colors_fce[k], alpha=0.06)
+    # 标注分位数
+    for pct_val in bp[pol][:, 3][:4]:
+        ax.axvline(x=pct_val, color='gray', linestyle=':', alpha=0.4, linewidth=0.7)
+    ax.set_xlabel(pol, fontsize=10)
+    ax.set_ylabel('隶属度', fontsize=9)
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=7, loc='upper right', ncol=1)
+    ax.grid(alpha=0.15)
+axes[-1].set_visible(False)
+plt.suptitle('各污染物梯形隶属度函数（基于真实浓度分位数断点）', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'membership_functions.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图2.5a] membership_functions.png')
+
+# ---- 图2.5b: 熵权法权重柱状图 ----
+from compute_aqi import compute_entropy_weights, build_membership_matrix
+
+R = build_membership_matrix(df, bp)
+weights = compute_entropy_weights(R)
+
+fig, ax = plt.subplots(figsize=(8, 5))
+w_colors = []
+for pol in FCE_POLLUTANTS:
+    w = weights[FCE_POLLUTANTS.index(pol)]
+    if w < 0.05:
+        w_colors.append('#fc8d59')
+    elif w < 0.15:
+        w_colors.append('#fee08b')
+    else:
+        w_colors.append('#1a9850')
+bars = ax.barh(FCE_POLLUTANTS, [weights[i] for i in range(len(FCE_POLLUTANTS))], color=w_colors, alpha=0.9, edgecolor='white')
+ax.set_xlabel('权重', fontsize=11)
+ax.set_title('熵权法客观权重（NMHC 自动降权至 0.03）', fontsize=13, fontweight='bold')
+ax.grid(alpha=0.2, axis='x')
+for bar, w in zip(bars, weights):
+    ax.text(bar.get_width() + 0.005, bar.get_y() + bar.get_height() / 2, f'{w:.4f}', va='center', fontsize=10, fontweight='bold')
+ax.set_xlim(0, max(weights) * 1.2)
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'entropy_weights.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图2.5b] entropy_weights.png')
+
+# ---- 图3: AQI 时序图（选取夏季+冬季各一周代表性时段） ----
+ts_start_summer = pd.Timestamp('2004-07-20')
+ts_end_summer = pd.Timestamp('2004-08-03')
+ts_start_winter = pd.Timestamp('2004-12-10')
+ts_end_winter = pd.Timestamp('2004-12-24')
+
+mask_summer = (df['Datetime'] >= ts_start_summer) & (df['Datetime'] <= ts_end_summer)
+mask_winter = (df['Datetime'] >= ts_start_winter) & (df['Datetime'] <= ts_end_winter)
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+
+for ax, mask, title, color in [
+    (axes[0], mask_summer, '夏季 (2004-07-20 ~ 08-03)', '#e74c3c'),
+    (axes[1], mask_winter, '冬季 (2004-12-10 ~ 12-24)', '#3498db')]:
+    seg = df[mask]
+    ax.plot(seg['Datetime'], seg['AQI'], color=color, linewidth=1.0, alpha=0.9)
+    ax.fill_between(seg['Datetime'], 0, seg['AQI'], color=color, alpha=0.08)
+    ax.set_ylabel('AQI', fontsize=11)
+    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.grid(alpha=0.2)
+    # 标注等级分界线
+    for level, yval, ls in [('优', 20, ':'), ('良', 40, ':'), ('轻度', 60, '--'), ('中度', 80, '--')]:
+        ax.axhline(y=yval, color='gray', linestyle=ls, alpha=0.35, linewidth=0.7)
+    ax.set_ylim(0, 105)
+
 axes[-1].set_xlabel('时间', fontsize=11)
 fig.autofmt_xdate()
 plt.tight_layout()
-plt.savefig(PICTURE_DIR / 'timeseries_pollutants.png', dpi=120, bbox_inches='tight')
+plt.savefig(PICTURE_DIR / 'timeseries_aqi.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图3] timeseries_aqi.png')
+
+# ---- 图4: 污染物时序图（NMHC 有真实值的时段 2004-03-20 ~ 04-03） ----
+ts_pol_start = pd.Timestamp('2004-03-20')
+ts_pol_end = pd.Timestamp('2004-04-03')
+mask_pol = (df['Datetime'] >= ts_pol_start) & (df['Datetime'] <= ts_pol_end)
+seg = df[mask_pol]
+fig, axes = plt.subplots(5, 1, figsize=(14, 14), sharex=True)
+for i, pol in enumerate(pollutants):
+    if pol in df.columns:
+        axes[i].plot(seg['Datetime'], seg[pol], linewidth=0.8, alpha=0.9, color=f'C{i}')
+        axes[i].fill_between(seg['Datetime'], 0, seg[pol], color=f'C{i}', alpha=0.06)
+        axes[i].set_ylabel(pol, fontsize=10)
+        axes[i].grid(alpha=0.2)
+axes[0].set_title(f'参考污染物浓度时间序列 ({ts_pol_start.date()} ~ {ts_pol_end.date()}, NMHC有真实观测)', fontsize=14, fontweight='bold')
+axes[-1].set_xlabel('时间', fontsize=11)
+fig.autofmt_xdate()
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'timeseries_pollutants.png', dpi=150, bbox_inches='tight')
 plt.close()
 print('  [图4] timeseries_pollutants.png')
+
+# ---- 图4.5a: 污染物相关性热图 ----
+fig, ax = plt.subplots(figsize=(8, 7))
+poll_data = df[pollutants].copy()
+corr = poll_data.corr()
+mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
+im = ax.imshow(corr, cmap='RdYlBu_r', vmin=-0.2, vmax=1.0, aspect='equal')
+for i in range(len(pollutants)):
+    for j in range(len(pollutants)):
+        if i >= j:
+            ax.text(j, i, f'{corr.iloc[i,j]:.2f}', ha='center', va='center',
+                    fontsize=12, fontweight='bold',
+                    color='white' if abs(corr.iloc[i,j]) > 0.6 else '#333')
+ax.set_xticks(range(len(pollutants)))
+ax.set_yticks(range(len(pollutants)))
+ax.set_xticklabels(pollutants, fontsize=11)
+ax.set_yticklabels(pollutants, fontsize=11)
+ax.set_title('参考污染物 Pearson 相关系数', fontsize=13, fontweight='bold')
+plt.colorbar(im, ax=ax, shrink=0.85, label='r')
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'pollutant_correlation.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图4.5a] pollutant_correlation.png')
+
+# ---- 图4.5b: 各月 AQI 箱线图 ----
+df['month'] = df['Datetime'].dt.month
+month_labels = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
+fig, ax = plt.subplots(figsize=(12, 5))
+bp_data = [df[df['month'] == m]['AQI'].values for m in range(1, 13) if m in df['month'].values]
+bp_months = [m for m in range(1, 13) if m in df['month'].values]
+bp_colors = ['#a6d96a' if m in [5,6,7,8,9] else '#fdae61' if m in [3,4,10,11] else '#1a9641' for m in bp_months]
+boxes = ax.boxplot(bp_data, patch_artist=True, widths=0.6,
+                   medianprops=dict(color='#333', linewidth=1.5),
+                   flierprops=dict(marker='o', markersize=2, alpha=0.3))
+for patch, c in zip(boxes['boxes'], bp_colors):
+    patch.set_facecolor(c)
+    patch.set_alpha(0.75)
+ax.set_xticklabels([month_labels[m-1] for m in bp_months], fontsize=9)
+ax.set_ylabel('AQI', fontsize=11)
+ax.set_title('AQI 月际分布（春夏：绿 / 过渡季：橙 / 冬季：深绿）', fontsize=13, fontweight='bold')
+ax.grid(alpha=0.2, axis='y')
+# 均值连线
+means = [df[df['month'] == m]['AQI'].mean() for m in bp_months]
+ax.plot(range(1, len(means)+1), means, 'o-', color='#c0392b', linewidth=1.8, markersize=5, label='月均值')
+ax.legend(fontsize=10)
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'monthly_aqi_boxplot.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图4.5b] monthly_aqi_boxplot.png')
 
 # ============================================================
 # 2. 问题2 — 传感器→AQI 预测模型
@@ -299,21 +434,104 @@ print(f'\n特征重要性排名 (Top 10):')
 for _, row in feature_importance.head(10).iterrows():
     print(f'  {row["feature"]:20s}: {row["importance"]:.4f}')
 
-# ---- 图7: OOF 预测 vs 真实值 (时间序列) ----
-fig, ax = plt.subplots(figsize=(14, 5))
-time_axis = df_valid['Datetime']
-ax.plot(time_axis, y.values, color='#e74c3c', linewidth=0.8, alpha=0.8, label='真实 AQI')
-ax.plot(time_axis, oof_pred.values, color='#3498db', linewidth=0.6, alpha=0.8, label='OOF 预测 AQI')
-ax.set_xlabel('时间', fontsize=11)
-ax.set_ylabel('AQI', fontsize=11)
-ax.set_title('OOF 预测 vs 真实 AQI (5折时序交叉验证)', fontsize=14, fontweight='bold')
-ax.legend(fontsize=11)
-ax.grid(alpha=0.2)
+# ---- 图7: OOF 预测 vs 真实值 (夏季+冬季代表性时段) ----
+mask_valid_summer = (df_valid['Datetime'] >= ts_start_summer) & (df_valid['Datetime'] <= ts_end_summer)
+mask_valid_winter = (df_valid['Datetime'] >= ts_start_winter) & (df_valid['Datetime'] <= ts_end_winter)
+
+fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+
+for ax, mask, title in [
+    (axes[0], mask_valid_summer, f'夏季 ({ts_start_summer.date()} ~ {ts_end_summer.date()})'),
+    (axes[1], mask_valid_winter, f'冬季 ({ts_start_winter.date()} ~ {ts_end_winter.date()})')]:
+    seg_valid = df_valid[mask]
+    seg_y = y.values[mask.values]
+    seg_pred = oof_pred.values[mask.values]
+    ax.plot(seg_valid['Datetime'], seg_y, color='#e74c3c', linewidth=1.0, alpha=0.85, label='真实 AQI')
+    ax.plot(seg_valid['Datetime'], seg_pred, color='#3498db', linewidth=1.0, alpha=0.85, label='OOF 预测 AQI')
+    ax.set_ylabel('AQI', fontsize=11)
+    ax.set_title(title, fontsize=13, fontweight='bold')
+    ax.legend(fontsize=10, loc='upper right')
+    ax.grid(alpha=0.2)
+
+axes[-1].set_xlabel('时间', fontsize=11)
 fig.autofmt_xdate()
 plt.tight_layout()
-plt.savefig(PICTURE_DIR / 'timeseries_prediction.png', dpi=120, bbox_inches='tight')
+plt.savefig(PICTURE_DIR / 'timeseries_prediction.png', dpi=150, bbox_inches='tight')
 plt.close()
 print('  [图7] timeseries_prediction.png')
+
+# ---- 图7.5a: 预测残差分布 ----
+residuals = y.values - oof_pred.values
+valid_res = residuals[~np.isnan(residuals)]
+print(f'  [图7.5a] OOF覆盖样本={len(valid_res)}/{len(y)} (首{len(y)-len(valid_res)}行为纯训练集)')
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+axes[0].hist(valid_res, bins=60, color='#3498db', alpha=0.8, edgecolor='white')
+axes[0].axvline(x=0, color='#e74c3c', linestyle='--', linewidth=1.5)
+axes[0].axvline(x=valid_res.mean(), color='#e74c3c', linestyle='-', linewidth=1.2, label=f'均值={valid_res.mean():.2f}')
+axes[0].set_xlabel('残差 (真实 - 预测)', fontsize=11)
+axes[0].set_ylabel('频数', fontsize=11)
+axes[0].set_title('预测残差分布 (OOF)', fontsize=13, fontweight='bold')
+axes[0].legend(fontsize=10)
+axes[0].grid(alpha=0.2, axis='y')
+# Q-Q 图
+from scipy import stats
+stats.probplot(valid_res, dist='norm', plot=axes[1])
+axes[1].get_lines()[0].set_markerfacecolor('#3498db')
+axes[1].get_lines()[0].set_markeredgecolor('#3498db')
+axes[1].get_lines()[1].set_color('#e74c3c')
+axes[1].set_title('Q-Q 图 (正态性检验)', fontsize=13, fontweight='bold')
+axes[1].grid(alpha=0.2)
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'residual_distribution.png', dpi=150, bbox_inches='tight')
+plt.close()
+print(f'  残差均值={valid_res.mean():.3f}, 标准差={valid_res.std():.3f}')
+
+# ---- 图7.5b: 传感器与 AQI 相关性矩阵 ----
+corr_cols = sensor_cols + ['AQI']
+corr_data = df_valid[corr_cols].copy()
+sensor_corr = corr_data.corr()
+fig, ax = plt.subplots(figsize=(8, 7))
+im = ax.imshow(sensor_corr, cmap='RdYlBu_r', vmin=0, vmax=1, aspect='equal')
+labels = ['CO_s', 'NMHC_s', 'NOx_s', 'NO2_s', 'O3_s', 'AQI']
+for i in range(len(labels)):
+    for j in range(len(labels)):
+        ax.text(j, i, f'{sensor_corr.iloc[i,j]:.2f}', ha='center', va='center',
+                fontsize=11, fontweight='bold',
+                color='white' if sensor_corr.iloc[i,j] > 0.55 else '#333')
+ax.set_xticks(range(len(labels)))
+ax.set_yticks(range(len(labels)))
+ax.set_xticklabels(labels, fontsize=10)
+ax.set_yticklabels(labels, fontsize=10)
+ax.set_title('传感器读数与 AQI 相关系数', fontsize=13, fontweight='bold')
+plt.colorbar(im, ax=ax, shrink=0.85, label='r')
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'sensor_correlation.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图7.5b] sensor_correlation.png')
+
+# ---- 图7.5c: AQI 日变化模式 (diurnal) ----
+df_valid_copy = df_valid.copy()
+df_valid_copy['hour'] = df_valid_copy['Datetime'].dt.hour
+hourly = df_valid_copy.groupby('hour')['AQI'].agg(['mean', 'std', 'count']).reset_index()
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.fill_between(hourly['hour'],
+                hourly['mean'] - hourly['std'],
+                hourly['mean'] + hourly['std'],
+                color='#3498db', alpha=0.15)
+ax.plot(hourly['hour'], hourly['mean'], 'o-', color='#3498db', linewidth=2, markersize=6)
+ax.set_xlabel('小时', fontsize=11)
+ax.set_ylabel('AQI', fontsize=11)
+ax.set_title('AQI 日变化模式（均值 ± 标准差）', fontsize=13, fontweight='bold')
+ax.set_xticks(range(0, 24, 2))
+ax.grid(alpha=0.2)
+# 标注早晚高峰
+for h, label in [(8, '早高峰'), (18, '晚高峰')]:
+    ax.axvline(x=h, color='#e74c3c', linestyle='--', alpha=0.5, linewidth=1)
+    ax.text(h + 0.3, ax.get_ylim()[1] * 0.92, label, color='#e74c3c', fontsize=9)
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'diurnal_aqi.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图7.5c] diurnal_aqi.png')
 
 # ---- 图8: 各折评估结果 ----
 fig, ax = plt.subplots(figsize=(10, 5))
@@ -410,14 +628,21 @@ print(f'''
   - 特征数量: {len(feature_cols)} 个 ({len(sensor_cols)} 传感器 + 1 时间)
 
 生成图表 (output/picture/):
-  1. aqi_distribution.png      — AQI 分布直方图
-  2. aqi_grade_pie.png         — 污染等级饼图
-  3. timeseries_aqi.png        — AQI 时间序列
-  4. timeseries_pollutants.png — 污染物浓度时间序列
-  5. model_comparison.png      — 模型性能对比
-  6. feature_importance.png    — 特征重要性
-  7. timeseries_prediction.png — 预测 vs 真实值
-  8. fold_evaluation.png       — 各折 R^2 对比
+  1.  aqi_distribution.png        — AQI 分布直方图
+  2.  aqi_grade_pie.png           — 污染等级饼图
+  3.  membership_functions.png    — 梯形隶属度函数曲线
+  4.  entropy_weights.png         — 熵权法权重柱状图
+  5.  timeseries_aqi.png          — AQI 时间序列 (夏/冬)
+  6.  timeseries_pollutants.png   — 污染物浓度时间序列
+  7.  pollutant_correlation.png   — 污染物相关性热图
+  8.  monthly_aqi_boxplot.png     — AQI 月际箱线图
+  9.  model_comparison.png        — 模型性能对比
+  10. feature_importance.png      — 特征重要性
+  11. timeseries_prediction.png   — 预测 vs 真实值 (夏/冬)
+  12. residual_distribution.png   — 预测残差分布 + Q-Q 图
+  13. sensor_correlation.png      — 传感器与 AQI 相关性
+  14. diurnal_aqi.png             — AQI 日变化模式
+  15. fold_evaluation.png         — 各折 R^2 对比
 
 输出文件:
   - output/xgb_model.pkl       (训练好的模型)

@@ -24,7 +24,10 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import seaborn as sns
+
+# 中文字体
+matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 DEFAULT_INPUT = Path('题目/B题附件：AirQualityUCI.xlsx')
 OUTPUT_DIR = Path('output')
@@ -124,23 +127,24 @@ def fill_gap_aware(series: pd.Series, max_interp_gap: int = 6) -> pd.Series:
     return s
 
 
-def clean_values(df: pd.DataFrame, fill_method: str = 'interpolate') -> pd.DataFrame:
-    """将 -200 替换为 NaN 并按间隙长度分策略填充"""
-    measure_cols = [
-        'CO', 'PT08.S1_CO', 'NMHC', 'C6H6', 'PT08.S2_NMHC',
-        'NOx', 'PT08.S3_NOx', 'NO2', 'PT08.S4_NO2', 'PT08.S5_O3',
-        'T', 'RH', 'AH'
-    ]
+MEASURE_COLS = [
+    'CO', 'PT08.S1_CO', 'NMHC', 'C6H6', 'PT08.S2_NMHC',
+    'NOx', 'PT08.S3_NOx', 'NO2', 'PT08.S4_NO2', 'PT08.S5_O3',
+    'T', 'RH', 'AH'
+]
 
-    # 强制数值类型
-    for col in measure_cols:
+
+def mark_missing(df: pd.DataFrame) -> pd.DataFrame:
+    """将 -200 替换为 NaN，强制数值类型。返回含 NaN 的 DataFrame（不填充）。"""
+    for col in MEASURE_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+    return df.replace(-200, np.nan)
 
-    # -200 → NaN
-    df = df.replace(-200, np.nan)
 
-    numeric_cols = [c for c in measure_cols if c in df.columns]
+def clean_values(df: pd.DataFrame, fill_method: str = 'interpolate') -> pd.DataFrame:
+    """按间隙长度分策略填充缺失值（-200 已替换为 NaN）"""
+    numeric_cols = [c for c in MEASURE_COLS if c in df.columns]
 
     if fill_method == 'interpolate':
         for col in numeric_cols:
@@ -162,24 +166,56 @@ def save_missing_summary(df: pd.DataFrame, out_path: Path):
 
 
 def plot_missing_heatmap(df: pd.DataFrame, out_png: Path):
-    """生成缺失值热图（前1000行数值列）"""
-    plot_df = df.select_dtypes(include=[np.number])
-    if plot_df.empty:
+    """缺失值可视化：上侧柱状图（缺失率%），下侧采样矩阵热图（每50行采样，展示缺失模式）"""
+    numeric_cols = [c for c in MEASURE_COLS if c in df.columns]
+    if not numeric_cols:
         print('No numeric columns for missing heatmap; skipping.')
         return
-    sample = plot_df.iloc[:min(1000, len(plot_df))]
-    if sample.shape[0] == 0 or sample.shape[1] == 0:
-        print('No data for missing heatmap; skipping.')
-        return
-    try:
-        plt.figure(figsize=(12, max(4, sample.shape[1] * 0.5)))
-        sns.heatmap(sample.isnull(), cbar=False, cmap='Reds')
-        plt.title('Missingness heatmap (numeric cols, first 1000 rows)')
-        plt.tight_layout()
-        plt.savefig(out_png, dpi=100)
-        plt.close()
-    except Exception as e:
-        print(f'Failed to plot missing heatmap: {e}')
+
+    # 采样：每 stride 行取一行，避免图像过于拥挤
+    stride = 50
+    sample_idx = list(range(0, len(df), stride))
+    sample = df[numeric_cols].iloc[sample_idx]
+
+    miss_pct = (sample.isnull().mean() * 100).sort_values(ascending=False)
+
+    fig = plt.figure(figsize=(14, 7))
+    gs = fig.add_gridspec(2, 1, height_ratios=[1.5, 3], hspace=0.08)
+
+    # ---- 上侧：柱状图 ----
+    ax_bar = fig.add_subplot(gs[0])
+    colors = ['#d7191c' if v > 50 else '#fdae61' if v > 10 else '#a6d96a' for v in miss_pct.values]
+    ax_bar.bar(range(len(miss_pct)), miss_pct.values, color=colors, alpha=0.9, edgecolor='white', linewidth=0.5)
+    ax_bar.set_xticks(range(len(miss_pct)))
+    ax_bar.set_xticklabels([])
+    ax_bar.set_ylabel('缺失率 (%)', fontsize=10)
+    ax_bar.set_ylim(0, max(miss_pct.max() * 1.15, 10))
+    ax_bar.grid(axis='y', alpha=0.25)
+    for i, (_, v) in enumerate(miss_pct.items()):
+        ax_bar.text(i, v + 0.8, f'{v:.1f}%', ha='center', fontsize=7.5, fontweight='bold',
+                    color='#c0392b' if v > 50 else '#555')
+    # 高缺失率标注
+    high_miss = miss_pct[miss_pct > 50]
+    if len(high_miss) > 0:
+        ax_bar.set_title(f'各变量缺失率（{high_miss.index[0]} 缺失 {high_miss.iloc[0]:.1f}%，需特殊处理）',
+                         fontsize=12, fontweight='bold')
+
+    # ---- 下侧：采样矩阵热图 ----
+    ax_mat = fig.add_subplot(gs[1])
+    miss_mask = sample.isnull().reindex(columns=miss_pct.index)
+    ax_mat.imshow(miss_mask.T, aspect='auto', cmap=plt.cm.Reds, interpolation='nearest', vmin=0, vmax=1)
+    ax_mat.set_yticks(range(len(miss_pct)))
+    ax_mat.set_yticklabels(miss_pct.index, fontsize=8)
+    ax_mat.set_xlabel(f'样本（每 {stride} 行采样，共 {len(sample_idx)} 个时间点）', fontsize=10)
+    # X 轴刻度：显示对应的行索引
+    xtick_step = max(1, len(sample_idx) // 10)
+    ax_mat.set_xticks(range(0, len(sample_idx), xtick_step))
+    ax_mat.set_xticklabels([str(sample_idx[i]) for i in range(0, len(sample_idx), xtick_step)], fontsize=7)
+
+    plt.suptitle('数据缺失模式（-200 标记值替换为 NaN）', fontsize=14, fontweight='bold', y=0.98)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close()
 
 
 def main():
@@ -205,21 +241,23 @@ def main():
     print('Building Datetime from Date + Time...')
     df = build_datetime(df)
 
-    print('Replacing -200 with NaN and filling...')
+    print('Replacing -200 with NaN...')
+    df = mark_missing(df)
+
+    # 缺失热图（在填充之前生成，展示真实缺失模式）
+    missing_summary = save_missing_summary(df, MISSING_SUMMARY_OUT)
+    print('Missing summary:')
+    print(missing_summary)
+    plot_missing_heatmap(df, picture_dir / 'missing_heatmap.png')
+    print(f'Missing heatmap saved to {picture_dir / "missing_heatmap.png"}')
+
+    print('Filling missing values...')
     df = clean_values(df, fill_method=args.fill)
 
     # 保存清洗后数据
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_csv, index=False, encoding='utf-8-sig', float_format='%.6g')
     print(f'Saved cleaned data to {out_csv}')
-
-    # 缺失统计
-    missing_summary = save_missing_summary(df, MISSING_SUMMARY_OUT)
-    print('Missing summary:')
-    print(missing_summary)
-
-    # 缺失热图
-    plot_missing_heatmap(df, picture_dir / 'missing_heatmap.png')
     print(f'Plots saved to {picture_dir}')
 
     # 验证 Datetime
