@@ -48,13 +48,13 @@ B题/
 pip install -r requirements.txt
 
 # 步骤1: 数据清洗（-200 → NaN 并插值填充，合并 Date+Time）
-python program/read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
+python3 program/read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
 
 # 步骤2: 模糊综合评价计算 AQI
-python program/compute_aqi.py
+python3 program/compute_aqi.py
 
 # 步骤3: 综合评价、预测建模与可视化
-python program/analysis.py
+python3 program/analysis.py
 ```
 
 ## 方法概述
