@@ -38,7 +38,12 @@ B题/
         ├── residual_distribution.png      # 预测残差分布 + Q-Q 图
         ├── sensor_correlation.png         # 传感器与 AQI 相关性
         ├── diurnal_aqi.png                # AQI 日变化模式
-        └── fold_evaluation.png            # 各折交叉验证结果
+        ├── fold_evaluation.png            # 各折交叉验证结果
+        ├── weight_comparison.png          # FCE 权重对比（熵权 vs PCA vs 混合）
+        ├── aqi_weight_comparison.png      # AQI 散点对比（熵权 vs 混合权重）
+        ├── shap_gain_comparison.png       # Gain vs SHAP 重要性对比
+        ├── shap_summary.png               # SHAP summary plot
+        └── vif_pruning.png                # VIF 特征剪枝性能对比
 ```
 
 ## 快速开始
@@ -48,13 +53,16 @@ B题/
 pip install -r requirements.txt
 
 # 步骤1: 数据清洗（-200 → NaN 并插值填充，合并 Date+Time）
-python3 program/read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
+python program/read_and_clean.py --input "题目/B题附件：AirQualityUCI.xlsx" --out_csv output/data_clean.csv
 
 # 步骤2: 模糊综合评价计算 AQI
-python3 program/compute_aqi.py
+python program/compute_aqi.py
 
 # 步骤3: 综合评价、预测建模与可视化
-python3 program/analysis.py
+python program/analysis.py
+
+# 步骤4（可选）: 模型改进分析（PCA-熵权混合、SHAP、VIF 剪枝）
+python program/model_improvement.py
 ```
 
 ## 方法概述
@@ -111,6 +119,41 @@ XGBoost 5 折交叉验证详细结果：
 | 3 | 0.602 | 13.00 | 4680/1559 |
 | 4 | 0.833 | 8.41 | 6239/1559 |
 | 5 | 0.884 | 7.03 | 7798/1559 |
+
+## 模型改进分析（`model_improvement.py`）
+
+针对多重共线性问题的三项改进实验：
+
+### 1. PCA-熵权混合权重（FCE 改进）
+
+| 方法 | CO | NMHC | C6H6 | NOx | NO2 | 交通源合计 |
+|------|-----|------|------|-----|-----|-----------|
+| 熵权法 | 0.262 | 0.031 | 0.140 | 0.291 | 0.277 | 0.830 |
+| PCA 权重 | 0.203 | 0.162 | 0.205 | 0.218 | 0.213 | 0.633 |
+| 混合权重 | 0.232 | 0.096 | 0.172 | 0.254 | 0.245 | 0.732 |
+
+- 混合权重 AQI 与熵权法 AQI 相关度 r = 0.9987，等级一致率 95.6%
+- 结论：FCE 对权重扰动高度鲁棒，熵权法可直接使用
+
+### 2. SHAP 特征重要性 vs Gain
+
+| 排名 | Gain 重要性 | SHAP 重要性 |
+|------|------------|------------|
+| 1 | PT08.S5_O3 (0.574) | PT08.S2_NMHC (7.12) |
+| 2 | PT08.S2_NMHC (0.185) | PT08.S5_O3 (6.50) |
+| 3 | PT08.S3_NOx (0.082) | PT08.S4_NO2 (3.44) |
+
+- SHAP 对特征共线性更鲁棒，推荐用于重要性归因
+
+### 3. VIF 特征剪枝
+
+| 配置 | 特征数 | R² |
+|------|--------|-----|
+| 基线（全特征） | 6 | 0.730 |
+| SHAP Top3 + hour | 4 | **0.744** |
+| 保守剪枝（VIF<5） | 3 | 0.546 |
+
+- SHAP 引导剪枝（4 特征）略优于基线，减少 33% 特征
 
 ## 环境依赖
 

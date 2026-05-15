@@ -119,29 +119,56 @@ sys.path.insert(0, str(Path(__file__).parent))
 from compute_aqi import build_membership_breakpoints, trapezoid_membership, POLLUTANTS as FCE_POLLUTANTS, GRADE_NAMES as FCE_GRADES
 
 bp = build_membership_breakpoints(df)
-fig, axes = plt.subplots(2, 3, figsize=(16, 10))
-axes = axes.flatten()
-for idx, pol in enumerate(FCE_POLLUTANTS):
-    ax = axes[idx]
+
+# 2x2 正方形布局：CO, C6H6, NOx, NO2（NMHC 因 90% 缺失率，隶属度信息量低，省略）
+plot_pollutants = ['CO', 'C6H6', 'NOx', 'NO2']
+fig = plt.figure(figsize=(14, 11))
+grade_colors_fce = ['#1a9850', '#91cf60', '#d9ef8b', '#fee08b', '#fc8d59']
+grade_labels = FCE_GRADES
+
+for idx, pol in enumerate(plot_pollutants):
+    ax = fig.add_subplot(2, 2, idx + 1)
     if pol not in bp:
         continue
+
+    # 实际数据直方图（底层，展示浓度分布）
+    real_data = df[pol].dropna().values
+    ax2 = ax.twinx()
+    ax2.hist(real_data, bins=60, color='#bdc3c7', alpha=0.5, edgecolor='white', linewidth=0.3)
+    ax2.set_ylabel('频数', fontsize=8, color='#7f8c8d')
+    ax2.tick_params(axis='y', labelsize=7, colors='#7f8c8d')
+    ax2.set_ylim(0, ax2.get_ylim()[1] * 1.3)  # 给文字留空间
+
+    # 隶属度曲线（上层）
     x_vals = np.linspace(df[pol].min(), df[pol].max(), 500)
-    grade_colors_fce = ['#1a9850', '#91cf60', '#d9ef8b', '#fee08b', '#fc8d59']
-    for k, gname in enumerate(FCE_GRADES):
+    for k, gname in enumerate(grade_labels):
         a, b, c, d = bp[pol][k]
         y = trapezoid_membership(x_vals, a, b, c, d)
-        ax.plot(x_vals, y, linewidth=1.8, color=grade_colors_fce[k], label=gname)
-        ax.fill_between(x_vals, 0, y, color=grade_colors_fce[k], alpha=0.06)
-    # 标注分位数
-    for pct_val in bp[pol][:, 3][:4]:
-        ax.axvline(x=pct_val, color='gray', linestyle=':', alpha=0.4, linewidth=0.7)
-    ax.set_xlabel(pol, fontsize=10)
+        ax.plot(x_vals, y, linewidth=2.0, color=grade_colors_fce[k], label=gname, zorder=5)
+        ax.fill_between(x_vals, 0, y, color=grade_colors_fce[k], alpha=0.08, zorder=2)
+
+    # 断点竖线（带标签）
+    bp_vals = [bp[pol][0, 2], bp[pol][1, 3], bp[pol][2, 3], bp[pol][3, 3]]
+    bp_labels_text = ['p20', 'p40', 'p60', 'p80']
+    for j, (pct_val, lbl) in enumerate(zip(bp_vals, bp_labels_text)):
+        ax.axvline(x=pct_val, color='#636363', linestyle='--', alpha=0.5, linewidth=1.0, zorder=3)
+        ax.text(pct_val, 1.03, lbl, fontsize=7, color='#636363', ha='center', va='bottom',
+                transform=ax.get_xaxis_transform())
+
+    # 显示关键统计量
+    ax.text(0.97, 0.92, f'范围: [{real_data.min():.1f}, {real_data.max():.1f}]\nn={len(real_data)}',
+            transform=ax.transAxes, fontsize=7.5, ha='right', va='top',
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.75))
+
+    ax.set_xlabel(pol, fontsize=11, fontweight='bold')
     ax.set_ylabel('隶属度', fontsize=9)
-    ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=7, loc='upper right', ncol=1)
-    ax.grid(alpha=0.15)
-axes[-1].set_visible(False)
-plt.suptitle('各污染物梯形隶属度函数（基于真实浓度分位数断点）', fontsize=14, fontweight='bold')
+    ax.set_ylim(0, 1.08)
+    ax.legend(fontsize=7, loc='upper left', ncol=5, framealpha=0.7)
+    ax.grid(alpha=0.12)
+    ax.set_xlim(df[pol].min(), df[pol].max())
+
+plt.suptitle('各污染物梯形隶属度函数（灰色直方图为实际浓度分布，虚线为分位数断点）',
+             fontsize=14, fontweight='bold', y=1.01)
 plt.tight_layout()
 plt.savefig(PICTURE_DIR / 'membership_functions.png', dpi=150, bbox_inches='tight')
 plt.close()
@@ -232,13 +259,14 @@ fig, ax = plt.subplots(figsize=(8, 7))
 poll_data = df[pollutants].copy()
 corr = poll_data.corr()
 mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
-im = ax.imshow(corr, cmap='RdYlBu_r', vmin=-0.2, vmax=1.0, aspect='equal')
+im = ax.imshow(corr, cmap='RdBu_r', vmin=-0.2, vmax=1.0, aspect='equal')
 for i in range(len(pollutants)):
     for j in range(len(pollutants)):
         if i >= j:
-            ax.text(j, i, f'{corr.iloc[i,j]:.2f}', ha='center', va='center',
+            val = corr.iloc[i, j]
+            ax.text(j, i, f'{val:.2f}', ha='center', va='center',
                     fontsize=12, fontweight='bold',
-                    color='white' if abs(corr.iloc[i,j]) > 0.6 else '#333')
+                    color='white' if abs(val) > 0.68 else '#2c3e50')
 ax.set_xticks(range(len(pollutants)))
 ax.set_yticks(range(len(pollutants)))
 ax.set_xticklabels(pollutants, fontsize=11)
@@ -491,13 +519,14 @@ corr_cols = sensor_cols + ['AQI']
 corr_data = df_valid[corr_cols].copy()
 sensor_corr = corr_data.corr()
 fig, ax = plt.subplots(figsize=(8, 7))
-im = ax.imshow(sensor_corr, cmap='RdYlBu_r', vmin=0, vmax=1, aspect='equal')
+im = ax.imshow(sensor_corr, cmap='YlOrRd', vmin=0, vmax=1, aspect='equal')
 labels = ['CO_s', 'NMHC_s', 'NOx_s', 'NO2_s', 'O3_s', 'AQI']
 for i in range(len(labels)):
     for j in range(len(labels)):
-        ax.text(j, i, f'{sensor_corr.iloc[i,j]:.2f}', ha='center', va='center',
+        val = sensor_corr.iloc[i, j]
+        ax.text(j, i, f'{val:.2f}', ha='center', va='center',
                 fontsize=11, fontweight='bold',
-                color='white' if sensor_corr.iloc[i,j] > 0.55 else '#333')
+                color='white' if val > 0.72 else '#2c3e50')
 ax.set_xticks(range(len(labels)))
 ax.set_yticks(range(len(labels)))
 ax.set_xticklabels(labels, fontsize=10)
