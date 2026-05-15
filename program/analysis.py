@@ -25,7 +25,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 中文字体
-matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+matplotlib.rcParams['font.sans-serif'] = ['Noto Sans CJK JP', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 OUTPUT_DIR = Path('output')

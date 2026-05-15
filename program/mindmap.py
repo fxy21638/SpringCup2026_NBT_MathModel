@@ -80,7 +80,7 @@ THEME_CONFIG = {
         "rankSpacing": 65,
     },
     "themeVariables": {
-        "fontFamily": "Microsoft YaHei, SimHei, Arial, sans-serif",
+        "fontFamily": "Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif",
         "fontSize": "15px",
         "primaryColor": "#ffffff",
         "primaryTextColor": "#111827",

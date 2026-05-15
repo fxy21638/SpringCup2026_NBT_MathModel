@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
-matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+matplotlib.rcParams['font.sans-serif'] = ['Noto Sans CJK JP', 'DejaVu Sans']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 from pathlib import Path
@@ -26,6 +26,33 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 import xgboost as xgb
 import shap
 import pickle
+
+# Monkey-patch: 修复 SHAP 0.49.1 与 xgboost 3.2.0 的 base_score 格式不兼容
+# xgboost 3.x 将 base_score 存储为 "[value]" 数组字符串，SHAP 期望纯数字字符串
+# 需同时 patch _tree 模块（直接 import 了该函数）和 _ubjson 模块
+def _patch_shap_for_xgboost3():
+    import shap.explainers.other._ubjson as _ubj
+    import shap.explainers._tree as _tree
+    _orig_decode = _ubj.decode_ubjson_buffer
+
+    def _patched_decode(fp):
+        jmodel = _orig_decode(fp)
+        _fix_learner_params(jmodel)
+        return jmodel
+
+    def _fix_learner_params(jmodel):
+        try:
+            lmp = jmodel.get("learner", {}).get("learner_model_param", {})
+            for key, val in lmp.items():
+                if isinstance(val, str) and val.startswith("[") and val.endswith("]") and len(val) > 2:
+                    lmp[key] = val[1:-1]
+        except Exception:
+            pass
+
+    _ubj.decode_ubjson_buffer = _patched_decode
+    _tree.decode_ubjson_buffer = _patched_decode
+
+_patch_shap_for_xgboost3()
 
 OUTPUT_DIR = Path('output')
 PICTURE_DIR = OUTPUT_DIR / 'picture'
