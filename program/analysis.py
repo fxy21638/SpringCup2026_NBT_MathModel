@@ -584,6 +584,109 @@ plt.savefig(PICTURE_DIR / 'fold_evaluation.png', dpi=120, bbox_inches='tight')
 plt.close()
 print('  [图8] fold_evaluation.png')
 
+# ---- 图9: XGBoost 回归树结构示意图（手动绘制，叶子标注 AQI 贡献值） ----
+import xgboost as xgb
+import re
+
+# 训练一棵深度 3 的单棵树，用于论文展示
+scaler_viz = StandardScaler()
+X_scaled_viz = scaler_viz.fit_transform(X)
+simple_tree = xgb.XGBRegressor(n_estimators=1, max_depth=3, learning_rate=0.3, random_state=42, verbosity=0)
+simple_tree.fit(X_scaled_viz, y)
+
+base_score = y.mean()  # 40.03
+lr = 0.3
+
+# 解析树结构
+dump_text = simple_tree.get_booster().get_dump(with_stats=True)[0]
+lines = dump_text.strip().split('\n')
+
+# 解析节点
+nodes = {}  # node_id -> {depth, is_leaf, split_feat, split_val, leaf_val, left, right, gain}
+for line in lines:
+    line = line.strip()
+    # 匹配叶子: 0:leaf=value,cover=...
+    leaf_match = re.match(r'(\d+):leaf=([-\d.]+),cover=([\d.]+)', line)
+    if leaf_match:
+        nid = int(leaf_match.group(1))
+        leaf_val = float(leaf_match.group(2))
+        depth = line.count('\t')
+        nodes[nid] = {'depth': depth, 'is_leaf': True, 'leaf_val': leaf_val, 'split_feat': None,
+                      'split_val': None, 'left': None, 'right': None, 'gain': None}
+        continue
+    # 匹配内部节点: 0:[f0<0.5] yes=1,no=2,missing=2,gain=...
+    split_match = re.match(r'(\d+):\[f(\d+)<([-\d.]+)\]\s*yes=(\d+),no=(\d+),missing=\d+,gain=([\d.]+)', line)
+    if split_match:
+        nid = int(split_match.group(1))
+        feat_idx = int(split_match.group(2))
+        split_val = float(split_match.group(3))
+        left = int(split_match.group(4))
+        right = int(split_match.group(5))
+        gain = float(split_match.group(6))
+        depth = line.count('\t')
+        nodes[nid] = {'depth': depth, 'is_leaf': False, 'split_feat': feat_idx,
+                      'split_val': split_val, 'left': left, 'right': right, 'gain': gain,
+                      'leaf_val': None}
+
+# 特征名映射（与模型输入一致）
+feat_names = ['PT08.S1_CO', 'PT08.S2_NMHC', 'PT08.S3_NOx', 'PT08.S4_NO2', 'PT08.S5_O3', 'hour']
+
+# 递归绘制
+def draw_subtree(ax, node_id, x, y, dx, dy):
+    """递归绘制节点及其子节点，返回叶子节点的 y 范围"""
+    node = nodes[node_id]
+    if node['is_leaf']:
+        aqi_contrib = lr * node['leaf_val']
+        aqi_pred = base_score + aqi_contrib
+        color = '#e74c3c' if aqi_contrib > 0 else '#3498db'
+        sign = '+' if aqi_contrib >= 0 else ''
+        text = f'预测 AQI ≈ {aqi_pred:.1f}\n(修正 {sign}{aqi_contrib:.1f})'
+        ax.text(x, y, text, ha='center', va='center', fontsize=7.5, fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.6', facecolor=color, alpha=0.18, edgecolor=color, linewidth=1.2))
+        return y, y, [x]
+
+    # 分裂节点
+    feat = feat_names[node['split_feat']]
+    val = node['split_val']
+    text = f'{feat} < {val:.2f} ?'
+    ax.text(x, y, text, ha='center', va='center', fontsize=8.5, fontweight='bold',
+            bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', edgecolor='#636363', linewidth=1.5))
+    ax.text(x, y - dy * 0.3, f'Gain={node["gain"]:.0f}', ha='center', va='top', fontsize=6, color='#888')
+
+    # 左子节点 (yes)
+    y_left_top, y_left_bot, xs_left = draw_subtree(ax, node['left'], x - dx, y - dy, dx * 0.55, dy)
+    # 右子节点 (no)
+    y_right_top, y_right_bot, xs_right = draw_subtree(ax, node['right'], x + dx, y - dy, dx * 0.55, dy)
+
+    # 连线
+    ax.plot([x, x - dx], [y - dy * 0.15, y_left_top + dy * 0.35], color='#636363', linewidth=0.8, zorder=0)
+    ax.plot([x, x + dx], [y - dy * 0.15, y_right_top + dy * 0.35], color='#636363', linewidth=0.8, zorder=0)
+
+    # 标签
+    ax.text(x - dx * 0.15, y - dy * 0.5, '是', fontsize=7, color='#2ecc71', fontweight='bold', ha='center')
+    ax.text(x + dx * 0.15, y - dy * 0.5, '否', fontsize=7, color='#e74c3c', fontweight='bold', ha='center')
+
+    return y, y_left_bot, [x] + xs_left + xs_right
+
+
+fig, ax = plt.subplots(figsize=(16, 10))
+ax.set_xlim(-5, 5)
+ax.set_ylim(-0.5, 4.5)
+ax.axis('off')
+
+root_id = 0
+draw_subtree(ax, root_id, 0, 4.0, 3.0, 1.0)
+
+# 标题和说明
+ax.text(0, 4.6, 'XGBoost 单棵回归树结构 (max_depth=3)', ha='center', fontsize=15, fontweight='bold', transform=ax.transData)
+ax.text(0, -0.2, f'预测公式: AQI = {base_score:.1f} (基础分) + {lr} (学习率) × 叶子修正值\n红色叶子 = 上调AQI (污染加重)  |  蓝色叶子 = 下调AQI (污染减轻)',
+        ha='center', fontsize=9, color='#555', transform=ax.transData)
+
+plt.tight_layout()
+plt.savefig(PICTURE_DIR / 'tree_depth3.png', dpi=150, bbox_inches='tight')
+plt.close()
+print('  [图9] tree_depth3.png')
+
 # 保存模型
 with open(MODEL_PATH, 'wb') as f:
     pickle.dump(best_model, f)
@@ -672,6 +775,7 @@ print(f'''
   13. sensor_correlation.png      — 传感器与 AQI 相关性
   14. diurnal_aqi.png             — AQI 日变化模式
   15. fold_evaluation.png         — 各折 R^2 对比
+  16. tree_depth3.png             — XGBoost 回归树结构示意图
 
 输出文件:
   - output/xgb_model.pkl       (训练好的模型)

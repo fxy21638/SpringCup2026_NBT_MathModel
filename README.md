@@ -39,6 +39,7 @@ B题/
         ├── sensor_correlation.png         # 传感器与 AQI 相关性
         ├── diurnal_aqi.png                # AQI 日变化模式
         ├── fold_evaluation.png            # 各折交叉验证结果
+        ├── tree_depth3.png                # XGBoost 回归树结构示意图
         ├── weight_comparison.png          # FCE 权重对比（熵权 vs PCA vs 混合）
         ├── aqi_weight_comparison.png      # AQI 散点对比（熵权 vs 混合权重）
         ├── shap_gain_comparison.png       # Gain vs SHAP 重要性对比
