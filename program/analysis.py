@@ -76,18 +76,21 @@ for p in pollutants:
         print(f'  {p:6s}: 均值={df[p].mean():8.2f}, 标准差={df[p].std():8.2f}, '
               f'min={df[p].min():8.2f}, max={df[p].max():8.2f}')
 
-# ---- 图1: AQI 分布直方图 ----
+# ---- 图1: AQI 分布直方图（按实际 FCE 等级着色，与饼图同源） ----
 fig, ax = plt.subplots(figsize=(10, 5))
 n, bins, patches = ax.hist(df['AQI'], bins=50, color='steelblue', alpha=0.85, edgecolor='white')
 
-# 按等级着色
+# 每根柱子按该区间内样本的实际 FCE 等级（多数投票）着色，与饼图判定一致
 grade_colors = ['#1a9850', '#91cf60', '#d9ef8b', '#fee08b', '#fc8d59']
+grade_to_color = dict(zip(grade_order, grade_colors))
 for i in range(len(bins) - 1):
-    center = (bins[i] + bins[i + 1]) / 2
-    for j, (lo, hi) in enumerate([(0, 20), (20, 40), (40, 60), (60, 80), (80, 100)]):
-        if lo <= center < hi:
-            patches[i].set_facecolor(grade_colors[j])
-            break
+    lo, hi = bins[i], bins[i + 1]
+    mask = (df['AQI'] >= lo) & (df['AQI'] < hi)
+    if i == len(bins) - 2:
+        mask = (df['AQI'] >= lo) & (df['AQI'] <= hi)
+    grades = df.loc[mask, 'AQI_等级']
+    if len(grades) > 0:
+        patches[i].set_facecolor(grade_to_color[grades.mode().iloc[0]])
 
 ax.set_xlabel('AQI', fontsize=12)
 ax.set_ylabel('频数', fontsize=12)
@@ -234,8 +237,8 @@ plt.savefig(PICTURE_DIR / 'timeseries_aqi.png', dpi=150, bbox_inches='tight')
 plt.close()
 print('  [图3] timeseries_aqi.png')
 
-# ---- 图4: 污染物时序图（NMHC 有真实值的时段 2004-03-20 ~ 04-03） ----
-ts_pol_start = pd.Timestamp('2004-03-20')
+# ---- 图4: 污染物时序图（NMHC 有真实值的时段 2004-03-23 ~ 04-03） ----
+ts_pol_start = pd.Timestamp('2004-03-23')
 ts_pol_end = pd.Timestamp('2004-04-03')
 mask_pol = (df['Datetime'] >= ts_pol_start) & (df['Datetime'] <= ts_pol_end)
 seg = df[mask_pol]
@@ -246,7 +249,7 @@ for i, pol in enumerate(pollutants):
         axes[i].fill_between(seg['Datetime'], 0, seg[pol], color=f'C{i}', alpha=0.06)
         axes[i].set_ylabel(pol, fontsize=10)
         axes[i].grid(alpha=0.2)
-axes[0].set_title(f'参考污染物浓度时间序列 ({ts_pol_start.date()} ~ {ts_pol_end.date()}, NMHC有真实观测)', fontsize=14, fontweight='bold')
+axes[0].set_title(f'参考污染物浓度时间序列 ({ts_pol_start.date()} ~ {ts_pol_end.date()}, NMHC 真实值时段)', fontsize=14, fontweight='bold')
 axes[-1].set_xlabel('时间', fontsize=11)
 fig.autofmt_xdate()
 plt.tight_layout()
