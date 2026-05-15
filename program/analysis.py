@@ -584,106 +584,134 @@ plt.savefig(PICTURE_DIR / 'fold_evaluation.png', dpi=120, bbox_inches='tight')
 plt.close()
 print('  [图8] fold_evaluation.png')
 
-# ---- 图9: XGBoost 回归树结构示意图（手动绘制，叶子标注 AQI 贡献值） ----
+# ---- 图9: XGBoost 回归树结构示意图（节点含 AQI 预测值，连线标注是/否） ----
 import xgboost as xgb
 import re
+from matplotlib.patches import FancyBboxPatch
 
-# 训练一棵深度 3 的单棵树，用于论文展示
 scaler_viz = StandardScaler()
 X_scaled_viz = scaler_viz.fit_transform(X)
 simple_tree = xgb.XGBRegressor(n_estimators=1, max_depth=3, learning_rate=0.3, random_state=42, verbosity=0)
 simple_tree.fit(X_scaled_viz, y)
 
-base_score = y.mean()  # 40.03
-lr = 0.3
-
-# 解析树结构
-dump_text = simple_tree.get_booster().get_dump(with_stats=True)[0]
-lines = dump_text.strip().split('\n')
-
-# 解析节点
-nodes = {}  # node_id -> {depth, is_leaf, split_feat, split_val, leaf_val, left, right, gain}
-for line in lines:
-    line = line.strip()
-    # 匹配叶子: 0:leaf=value,cover=...
-    leaf_match = re.match(r'(\d+):leaf=([-\d.]+),cover=([\d.]+)', line)
-    if leaf_match:
-        nid = int(leaf_match.group(1))
-        leaf_val = float(leaf_match.group(2))
-        depth = line.count('\t')
-        nodes[nid] = {'depth': depth, 'is_leaf': True, 'leaf_val': leaf_val, 'split_feat': None,
-                      'split_val': None, 'left': None, 'right': None, 'gain': None}
-        continue
-    # 匹配内部节点: 0:[f0<0.5] yes=1,no=2,missing=2,gain=...
-    split_match = re.match(r'(\d+):\[f(\d+)<([-\d.]+)\]\s*yes=(\d+),no=(\d+),missing=\d+,gain=([\d.]+)', line)
-    if split_match:
-        nid = int(split_match.group(1))
-        feat_idx = int(split_match.group(2))
-        split_val = float(split_match.group(3))
-        left = int(split_match.group(4))
-        right = int(split_match.group(5))
-        gain = float(split_match.group(6))
-        depth = line.count('\t')
-        nodes[nid] = {'depth': depth, 'is_leaf': False, 'split_feat': feat_idx,
-                      'split_val': split_val, 'left': left, 'right': right, 'gain': gain,
-                      'leaf_val': None}
-
-# 特征名映射（与模型输入一致）
+BASE_SCORE = y.mean()
+LR_TREE = 0.3
 feat_names = ['PT08.S1_CO', 'PT08.S2_NMHC', 'PT08.S3_NOx', 'PT08.S4_NO2', 'PT08.S5_O3', 'hour']
 
-# 递归绘制
-def draw_subtree(ax, node_id, x, y, dx, dy):
-    """递归绘制节点及其子节点，返回叶子节点的 y 范围"""
-    node = nodes[node_id]
-    if node['is_leaf']:
-        aqi_contrib = lr * node['leaf_val']
-        aqi_pred = base_score + aqi_contrib
-        color = '#e74c3c' if aqi_contrib > 0 else '#3498db'
-        sign = '+' if aqi_contrib >= 0 else ''
-        text = f'预测 AQI ≈ {aqi_pred:.1f}\n(修正 {sign}{aqi_contrib:.1f})'
-        ax.text(x, y, text, ha='center', va='center', fontsize=7.5, fontweight='bold',
-                bbox=dict(boxstyle='round,pad=0.6', facecolor=color, alpha=0.18, edgecolor=color, linewidth=1.2))
-        return y, y, [x]
+# 解析树结构
+dump = simple_tree.get_booster().get_dump(with_stats=True)[0]
+nodes = {}
+for line in dump.strip().split('\n'):
+    depth = line.count('\t')
+    line_s = line.strip()
+    m = re.match(r'(\d+):leaf=([^,]+),cover=', line_s)
+    if m:
+        nid = int(m.group(1))
+        nodes[nid] = {'depth': depth, 'is_leaf': True, 'leaf_val': float(m.group(2)),
+                      'split_feat': None, 'split_val': None,
+                      'left': None, 'right': None, 'gain': None}
+        continue
+    m = re.match(r'(\d+):\[f(\d+)<([^\]]+)\]', line_s)
+    if m:
+        nid = int(m.group(1))
+        rest = line_s[line_s.index(']')+1:]
+        yes_m = re.search(r'yes=(\d+)', rest)
+        no_m = re.search(r'no=(\d+)', rest)
+        gain_m = re.search(r'gain=([\d.]+)', rest)
+        nodes[nid] = {'depth': depth, 'is_leaf': False,
+                      'split_feat': int(m.group(2)), 'split_val': float(m.group(3)),
+                      'left': int(yes_m.group(1)) if yes_m else None,
+                      'right': int(no_m.group(1)) if no_m else None,
+                      'gain': float(gain_m.group(1)) if gain_m else 0, 'leaf_val': None}
 
-    # 分裂节点
-    feat = feat_names[node['split_feat']]
-    val = node['split_val']
-    text = f'{feat} < {val:.2f} ?'
-    ax.text(x, y, text, ha='center', va='center', fontsize=8.5, fontweight='bold',
-            bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', edgecolor='#636363', linewidth=1.5))
-    ax.text(x, y - dy * 0.3, f'Gain={node["gain"]:.0f}', ha='center', va='top', fontsize=6, color='#888')
+# 叶子从左到右分配 x 坐标，内部节点取子节点均值
+leaf_x = 0
+for nid in sorted(nodes.keys()):
+    if nodes[nid]['is_leaf']:
+        nodes[nid]['x'] = leaf_x
+        leaf_x += 1
 
-    # 左子节点 (yes)
-    y_left_top, y_left_bot, xs_left = draw_subtree(ax, node['left'], x - dx, y - dy, dx * 0.55, dy)
-    # 右子节点 (no)
-    y_right_top, y_right_bot, xs_right = draw_subtree(ax, node['right'], x + dx, y - dy, dx * 0.55, dy)
+def assign_x(nid):
+    nd = nodes[nid]
+    if nd['is_leaf']:
+        return
+    assign_x(nd['left'])
+    assign_x(nd['right'])
+    nd['x'] = (nodes[nd['left']]['x'] + nodes[nd['right']]['x']) / 2.0
+assign_x(0)
 
-    # 连线
-    ax.plot([x, x - dx], [y - dy * 0.15, y_left_top + dy * 0.35], color='#636363', linewidth=0.8, zorder=0)
-    ax.plot([x, x + dx], [y - dy * 0.15, y_right_top + dy * 0.35], color='#636363', linewidth=0.8, zorder=0)
+max_depth = max(nd['depth'] for nd in nodes.values())
+n_leaves = leaf_x
 
-    # 标签
-    ax.text(x - dx * 0.15, y - dy * 0.5, '是', fontsize=7, color='#2ecc71', fontweight='bold', ha='center')
-    ax.text(x + dx * 0.15, y - dy * 0.5, '否', fontsize=7, color='#e74c3c', fontweight='bold', ha='center')
-
-    return y, y_left_bot, [x] + xs_left + xs_right
-
-
-fig, ax = plt.subplots(figsize=(16, 10))
-ax.set_xlim(-5, 5)
-ax.set_ylim(-0.5, 4.5)
+BOX_W, BOX_H, LEAF_H = 2.6, 0.95, 0.80
+X_GAP, Y_GAP = 0.6, 2.2
+fig_w = max(14, n_leaves * (BOX_W + X_GAP) * 0.7 + 1.5)
+fig_h = (max_depth + 1) * Y_GAP + 3.5
+fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+span = (n_leaves - 1) * (BOX_W + X_GAP) if n_leaves > 1 else BOX_W
+ax.set_xlim(-BOX_W/2 - X_GAP, span + BOX_W/2 + X_GAP)
+ax.set_ylim(-1.0, max_depth * Y_GAP + 2.8)
 ax.axis('off')
 
-root_id = 0
-draw_subtree(ax, root_id, 0, 4.0, 3.0, 1.0)
+def draw_node(nid, px=None, is_left=None):
+    nd = nodes[nid]
+    x = nd['x'] * (BOX_W + X_GAP)
+    y = (max_depth - nd['depth']) * Y_GAP
+    bw, bh = BOX_W, (LEAF_H if nd['is_leaf'] else BOX_H)
 
-# 标题和说明
-ax.text(0, 4.6, 'XGBoost 单棵回归树结构 (max_depth=3)', ha='center', fontsize=15, fontweight='bold', transform=ax.transData)
-ax.text(0, -0.2, f'预测公式: AQI = {base_score:.1f} (基础分) + {lr} (学习率) × 叶子修正值\n红色叶子 = 上调AQI (污染加重)  |  蓝色叶子 = 下调AQI (污染减轻)',
-        ha='center', fontsize=9, color='#555', transform=ax.transData)
+    if nd['is_leaf']:
+        aqi_c = LR_TREE * nd['leaf_val']
+        aqi_p = BASE_SCORE + aqi_c
+        sign = '+' if aqi_c >= 0 else ''
+        color = '#d63031' if aqi_c > 0 else '#0984e3'
+        box = FancyBboxPatch((x - bw/2, y - bh/2), bw, bh,
+                             boxstyle='round,pad=0.12', linewidth=2.2,
+                             edgecolor=color, facecolor=color, alpha=0.22, zorder=2)
+        ax.add_patch(box)
+        ax.text(x, y + 0.08, 'AQI = {:.1f}'.format(aqi_p), ha='center', va='center',
+                fontsize=10.5, fontweight='bold', color=color, zorder=3)
+        ax.text(x, y - 0.27, '(修正 {}{:.1f})'.format(sign, aqi_c), ha='center', va='center',
+                fontsize=8.5, color=color, zorder=3)
+    else:
+        box = FancyBboxPatch((x - bw/2, y - bh/2), bw, bh,
+                             boxstyle='round,pad=0.12', linewidth=2.0,
+                             edgecolor='#7f8c8d', facecolor='#f5f6fa', zorder=2)
+        ax.add_patch(box)
+        ax.text(x, y + 0.1, '{} < {:.2f} ?'.format(feat_names[nd['split_feat']], nd['split_val']),
+                ha='center', va='center', fontsize=10, fontweight='bold', color='#2c3e50', zorder=3)
+        ax.text(x, y - 0.28, 'Gain={:.0f}'.format(nd['gain']), ha='center', va='center',
+                fontsize=7.5, color='#b2bec3', zorder=3)
 
-plt.tight_layout()
-plt.savefig(PICTURE_DIR / 'tree_depth3.png', dpi=150, bbox_inches='tight')
+    if px is not None:
+        py_bot = px[1] - BOX_H/2
+        ny_top = y + bh/2
+        mid_y = (py_bot + ny_top) / 2
+        color = '#00b894' if is_left else '#d63031'
+        ax.plot([px[0], px[0], x, x], [py_bot, mid_y, mid_y, ny_top],
+                color=color, linewidth=1.8, alpha=0.55, zorder=0, solid_capstyle='round')
+        label_x = px[0] + (x - px[0]) * 0.45
+        ax.text(label_x, mid_y, '是' if is_left else '否', ha='center', va='center',
+                fontsize=9.5, fontweight='bold', color=color,
+                bbox=dict(boxstyle='round,pad=0.25', facecolor='white',
+                          edgecolor=color, linewidth=0.8, alpha=0.9), zorder=4)
+
+    if not nd['is_leaf']:
+        draw_node(nd['left'], (x, y), is_left=True)
+        draw_node(nd['right'], (x, y), is_left=False)
+
+draw_node(0)
+mid_x = (n_leaves - 1) * (BOX_W + X_GAP) / 2
+ax.text(mid_x, max_depth * Y_GAP + 2.3,
+        'XGBoost 单棵回归树结构 (max_depth=3, 学习率=0.3)',
+        ha='center', fontsize=16, fontweight='bold', color='#2c3e50')
+ax.text(mid_x, -0.7,
+        '预测: AQI = {:.1f} (基础分) + {} x 叶子修正值     |     '
+        '红色节点 = 污染加重     |     蓝色节点 = 污染减轻'.format(BASE_SCORE, LR_TREE),
+        ha='center', fontsize=10.5, color='#636e72',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='#f8f9fa', edgecolor='#dfe6e9'))
+plt.tight_layout(pad=2)
+plt.savefig(PICTURE_DIR / 'tree_depth3.png', dpi=150, bbox_inches='tight',
+            facecolor='white', edgecolor='none')
 plt.close()
 print('  [图9] tree_depth3.png')
 
