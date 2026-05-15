@@ -2,10 +2,10 @@
 基于模糊综合评价的空气质量指数 (AQI) 计算。
 
 方法：模糊综合评价模型 (Fuzzy Comprehensive Evaluation)
-- 评价指标集 U = {CO, NMHC, C6H6, NOx, NO2}（5 项真实污染物，合规）
+- 评价指标集 U = {CO, C6H6, NOx, NO2}（4 项真实污染物，NMHC 因 90% 缺失不参与评价）
 - 评价等级集 V = {优, 良, 轻度污染, 中度污染, 重度污染}
 - 隶属度函数：梯形/半梯形（基于各污染物浓度分位数确定断点）
-- 权重向量 W：熵权法（客观赋权，自动为长缺口 NMHC 降权）
+- 权重向量 W：熵权法客观赋权
 - 模糊合成算子：M(·,+) 加权平均
 - 综合评判：最大隶属度原则判定等级
 - 连续 AQI 得分：去模糊化加权平均（等级中心值加权）
@@ -13,7 +13,7 @@
 特点：
 - 贴合空气质量等级边界的模糊本质
 - 只使用 5 项真实污染物，不涉及传感器或气象
-- 熵权法自动适应 NMHC 高缺失特征
+- 仅使用有真实测量的污染物，NMHC 因 90% 填充率不参与评价
 - 每时刻独立评价，无时序泄漏
 
 输出：output/data_with_aqi.csv
@@ -35,7 +35,7 @@ COL_MAP = {
 }
 
 # 5 种参考污染物（题目要求的各项污染物指标）
-POLLUTANTS = ['CO', 'NMHC', 'C6H6', 'NOx', 'NO2']
+POLLUTANTS = ['CO', 'C6H6', 'NOx', 'NO2']
 
 # 评价等级
 GRADE_NAMES = ['优', '良', '轻度污染', '中度污染', '重度污染']
@@ -59,8 +59,6 @@ def build_membership_breakpoints(df: pd.DataFrame) -> dict:
     """
     为每种污染物构造梯形隶属度函数的断点。
     使用真实（非填充）浓度值的分位数确定，保证绝对物理含义。
-
-    对 NMHC：仅使用原始非 -200 的真实值计算分位数，避免填充值导致的断点退化。
     最小间隔保证：相邻断点间距 ≥ (max-min)/20，防止梯形退化。
 
     返回: {pollutant: np.array of shape (5, 4)}
@@ -88,13 +86,14 @@ def build_membership_breakpoints(df: pd.DataFrame) -> dict:
         p60 = max(p_raw[2], p40 + min_gap)
         p80 = max(p_raw[3], p60 + min_gap)
 
-        # 各等级梯形参数 [a, b, c, d]
+        # 三角形隶属度（无平台段，避免 AQI 退化聚集）
+        # 峰点序列: vmin → p40 → p60 → p80 → vmax
         params = np.array([
-            [vmin, vmin, p20, p40],   # 优: 降半梯形
-            [p20,  p40,  p40, p60],   # 良: 梯形(平顶在p40)
-            [p40,  p60,  p60, p80],   # 轻度: 梯形(平顶在p60)
-            [p60,  p80,  p80, vmax],  # 中度: 梯形(平顶在p80)
-            [p80,  vmax, vmax, vmax], # 重度: 升半梯形
+            [vmin, vmin, vmin, p40],   # 优: 降半三角（峰在 vmin）
+            [vmin, p40,  p40,  p60],   # 良: 三角形（峰在 p40）
+            [p40,  p60,  p60,  p80],   # 轻度: 三角形（峰在 p60）
+            [p60,  p80,  p80,  vmax],  # 中度: 三角形（峰在 p80）
+            [p80,  vmax, vmax, vmax],  # 重度: 升半三角（峰在 vmax）
         ])
         breakpoints[pol] = params
     return breakpoints
@@ -199,7 +198,7 @@ def fuzzy_evaluate(df: pd.DataFrame) -> pd.DataFrame:
     for pol in POLLUTANTS:
         if pol in breakpoints:
             bp = breakpoints[pol]
-            print(f'    {pol:6s}: 优≤{bp[0,3]:.1f}, 良≤{bp[1,3]:.1f}, 轻度≤{bp[2,3]:.1f}, 中度≤{bp[3,3]:.1f}, 重度>{bp[4,0]:.1f}')
+            print(f'    {pol:6s}: 优≤{bp[0,3]:.1f}(峰{bp[0,1]:.1f}), 良峰{bp[1,1]:.1f}≤{bp[1,3]:.1f}, 轻度峰{bp[2,1]:.1f}≤{bp[2,3]:.1f}, 中度峰{bp[3,1]:.1f}≤{bp[3,3]:.1f}, 重度≥{bp[4,0]:.1f}(峰{bp[4,1]:.1f})')
 
     # 2. 构建隶属度矩阵
     print('  [2/4] 构建隶属度矩阵 R (9357×5×5)...')
@@ -249,7 +248,7 @@ def main():
     print(f'数据形状: {df.shape}')
 
     print('\n模糊综合评价模型:')
-    print('  评价指标: CO, NMHC, C6H6, NOx, NO2')
+    print('  评价指标: CO, C6H6, NOx, NO2（NMHC 因 90% 填充不参与）')
     print('  评价等级: 优 / 良 / 轻度污染 / 中度污染 / 重度污染')
     print('  隶属度函数: 梯形/半梯形（基于全局分位数断点）')
     print('  权重方法: 熵权法（客观赋权）')

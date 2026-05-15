@@ -195,7 +195,7 @@ for pol in FCE_POLLUTANTS:
         w_colors.append('#1a9850')
 bars = ax.barh(FCE_POLLUTANTS, [weights[i] for i in range(len(FCE_POLLUTANTS))], color=w_colors, alpha=0.9, edgecolor='white')
 ax.set_xlabel('权重', fontsize=11)
-ax.set_title('熵权法客观权重（NMHC 自动降权至 0.03）', fontsize=13, fontweight='bold')
+ax.set_title('熵权法客观权重', fontsize=13, fontweight='bold')
 ax.grid(alpha=0.2, axis='x')
 for bar, w in zip(bars, weights):
     ax.text(bar.get_width() + 0.005, bar.get_y() + bar.get_height() / 2, f'{w:.4f}', va='center', fontsize=10, fontweight='bold')
