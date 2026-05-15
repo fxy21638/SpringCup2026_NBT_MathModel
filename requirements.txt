@@ -5,3 +5,6 @@ seaborn
 scikit-learn
 xgboost
 openpyxl
+statsmodels
+shap
+scipy

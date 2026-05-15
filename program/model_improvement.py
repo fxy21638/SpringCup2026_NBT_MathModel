@@ -38,7 +38,7 @@ df = pd.read_csv(OUTPUT_DIR / 'data_with_aqi.csv')
 df['Datetime'] = pd.to_datetime(df['Datetime'])
 df = df.sort_values('Datetime').reset_index(drop=True)
 
-POLLUTANTS = ['CO', 'NMHC', 'C6H6', 'NOx', 'NO2']
+POLLUTANTS = ['CO', 'C6H6', 'NOx', 'NO2']
 SENSOR_COLS = ['PT08.S1_CO', 'PT08.S2_NMHC', 'PT08.S3_NOx', 'PT08.S4_NO2', 'PT08.S5_O3']
 
 print('=' * 65)
