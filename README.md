@@ -23,7 +23,8 @@ B题/
     ├── model_evaluation.csv               # 模型评估结果
     ├── xgb_model.pkl                      # 训练好的 XGBoost 模型
     └── picture/
-        ├── missing_heatmap.png            # 缺失值模式（柱状图 + 采样矩阵）
+        ├── missing_bar.png                # 各变量缺失率柱状图
+        ├── missing_heatmap.png            # 月度缺失率热图
         ├── aqi_distribution.png           # AQI 分布直方图
         ├── aqi_grade_pie.png              # 污染等级饼图
         ├── membership_functions.png       # 梯形隶属度函数曲线

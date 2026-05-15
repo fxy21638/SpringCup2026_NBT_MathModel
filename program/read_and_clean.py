@@ -165,8 +165,34 @@ def save_missing_summary(df: pd.DataFrame, out_path: Path):
     return summary
 
 
-def plot_missing_heatmap(df: pd.DataFrame, out_png: Path):
-    """缺失值可视化：上侧柱状图（缺失率%），下侧月度缺失率热图（清晰展示 NMHC 断崖式缺失）"""
+def plot_missing_bar(df: pd.DataFrame, out_png: Path):
+    """缺失值柱状图：各变量总体缺失率"""
+    numeric_cols = [c for c in MEASURE_COLS if c in df.columns]
+    if not numeric_cols:
+        print('No numeric columns for missing bar; skipping.')
+        return
+
+    miss_pct = (df[numeric_cols].isnull().mean() * 100).sort_values(ascending=False)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    colors = ['#d7191c' if v > 50 else '#fdae61' if v > 10 else '#a6d96a' for v in miss_pct.values]
+    ax.bar(range(len(miss_pct)), miss_pct.values, color=colors, alpha=0.9, edgecolor='white', linewidth=0.5)
+    ax.set_xticks(range(len(miss_pct)))
+    ax.set_xticklabels(miss_pct.index, fontsize=9, rotation=30, ha='right')
+    ax.set_ylabel('缺失率 (%)', fontsize=11)
+    ax.set_ylim(0, max(miss_pct.max() * 1.15, 10))
+    ax.grid(axis='y', alpha=0.25)
+    for i, (col_name, v) in enumerate(miss_pct.items()):
+        ax.text(i, v + 0.8, f'{v:.1f}%', ha='center', fontsize=8.5, fontweight='bold',
+                color='#c0392b' if v > 50 else '#555')
+    ax.set_title('各变量总体缺失率', fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(out_png, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_missing_monthly_heatmap(df: pd.DataFrame, out_png: Path):
+    """月度缺失率热图"""
     numeric_cols = [c for c in MEASURE_COLS if c in df.columns]
     if not numeric_cols:
         print('No numeric columns for missing heatmap; skipping.')
@@ -174,64 +200,41 @@ def plot_missing_heatmap(df: pd.DataFrame, out_png: Path):
 
     miss_pct = (df[numeric_cols].isnull().mean() * 100).sort_values(ascending=False)
 
-    # ---- 构建月度缺失率矩阵 ----
     df_temp = df.copy()
     df_temp['_month'] = df_temp['Datetime'].dt.to_period('M')
     months = sorted(df_temp['_month'].dropna().unique())
-    month_labels = [str(m) for m in months]  # e.g. '2004-03'
+    month_labels = [str(m) for m in months]
 
     monthly_miss = pd.DataFrame(index=numeric_cols, columns=month_labels, dtype=float)
     for col in numeric_cols:
         for m in months:
             mask = df_temp['_month'] == m
             monthly_miss.loc[col, str(m)] = df_temp.loc[mask, col].isnull().mean() * 100
-
-    # 按缺失率排序行
     monthly_miss = monthly_miss.reindex(miss_pct.index)
 
-    fig = plt.figure(figsize=(16, 8))
-    gs = fig.add_gridspec(2, 1, height_ratios=[1.2, 3], hspace=0.12)
+    fig, ax = plt.subplots(figsize=(14, 7))
+    im = ax.imshow(monthly_miss.values, aspect='auto', cmap='YlOrRd', vmin=0, vmax=100,
+                   interpolation='nearest')
 
-    # ---- 上侧：柱状图 ----
-    ax_bar = fig.add_subplot(gs[0])
-    colors = ['#d7191c' if v > 50 else '#fdae61' if v > 10 else '#a6d96a' for v in miss_pct.values]
-    ax_bar.bar(range(len(miss_pct)), miss_pct.values, color=colors, alpha=0.9, edgecolor='white', linewidth=0.5)
-    ax_bar.set_xticks(range(len(miss_pct)))
-    ax_bar.set_xticklabels([])
-    ax_bar.set_ylabel('缺失率 (%)', fontsize=11)
-    ax_bar.set_ylim(0, max(miss_pct.max() * 1.15, 10))
-    ax_bar.grid(axis='y', alpha=0.25)
-    for i, (col_name, v) in enumerate(miss_pct.items()):
-        ax_bar.text(i, v + 0.8, f'{v:.1f}%', ha='center', fontsize=8, fontweight='bold',
-                    color='#c0392b' if v > 50 else '#555')
-    ax_bar.set_title(f'各变量总体缺失率', fontsize=13, fontweight='bold', loc='left')
+    ax.set_yticks(range(len(monthly_miss.index)))
+    ax.set_yticklabels(monthly_miss.index, fontsize=10)
+    ax.set_xticks(range(len(month_labels)))
+    ax.set_xticklabels(month_labels, fontsize=9, rotation=45, ha='right')
+    ax.set_xlabel('月份', fontsize=12)
+    ax.set_title('月度缺失率 (%)  —  NMHC 自 2004-05 起完全缺失（传感器停运）', fontsize=14, fontweight='bold')
 
-    # ---- 下侧：月度缺失率热图 ----
-    ax_mat = fig.add_subplot(gs[1])
-    im = ax_mat.imshow(monthly_miss.values, aspect='auto', cmap='YlOrRd', vmin=0, vmax=100,
-                       interpolation='nearest')
-
-    ax_mat.set_yticks(range(len(monthly_miss.index)))
-    ax_mat.set_yticklabels(monthly_miss.index, fontsize=9)
-    ax_mat.set_xticks(range(len(month_labels)))
-    ax_mat.set_xticklabels(month_labels, fontsize=8, rotation=45, ha='right')
-    ax_mat.set_xlabel('月份', fontsize=11)
-    ax_mat.set_title('月度缺失率 (%)  —  NMHC 自 2004-05 起完全缺失（传感器停运）', fontsize=13, fontweight='bold', loc='left')
-
-    # 在每个单元格标注数值
     for i in range(len(monthly_miss.index)):
         for j in range(len(month_labels)):
             val = monthly_miss.values[i, j]
             if val > 0:
                 text_color = 'white' if val > 50 else '#333'
                 fontweight = 'bold' if val > 80 else 'normal'
-                ax_mat.text(j, i, f'{val:.0f}', ha='center', va='center', fontsize=7,
-                            color=text_color, fontweight=fontweight)
+                ax.text(j, i, f'{val:.0f}', ha='center', va='center', fontsize=7.5,
+                        color=text_color, fontweight=fontweight)
 
     # NMHC 100% 缺失分隔线
     nmhc_idx = list(monthly_miss.index).index('NMHC') if 'NMHC' in monthly_miss.index else None
     if nmhc_idx is not None:
-        # 找到 NMHC 缺失率从 <100 变成 100 的月份分界
         nmhc_row = monthly_miss.loc['NMHC']
         boundary_j = None
         for j, (m, v) in enumerate(nmhc_row.items()):
@@ -239,14 +242,13 @@ def plot_missing_heatmap(df: pd.DataFrame, out_png: Path):
                 boundary_j = j
                 break
         if boundary_j is not None and boundary_j > 0:
-            ax_mat.axvline(x=boundary_j - 0.5, color='#d7191c', linewidth=2.5, linestyle='--', alpha=0.8)
-            ax_mat.text(boundary_j - 0.7, nmhc_idx + 0.45, 'NMHC 传感器停运', fontsize=8,
-                        color='#d7191c', fontweight='bold', ha='right', va='bottom',
-                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.85))
+            ax.axvline(x=boundary_j - 0.5, color='#d7191c', linewidth=2.5, linestyle='--', alpha=0.8)
+            ax.text(boundary_j - 0.7, nmhc_idx + 0.45, 'NMHC 传感器停运', fontsize=9,
+                    color='#d7191c', fontweight='bold', ha='right', va='bottom',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.85))
 
-    plt.colorbar(im, ax=ax_mat, shrink=0.85, label='缺失率 %')
-    plt.suptitle('数据缺失模式分析（-200 标记值替换为 NaN）', fontsize=15, fontweight='bold', y=0.99)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.colorbar(im, ax=ax, shrink=0.85, label='缺失率 %')
+    plt.tight_layout()
     plt.savefig(out_png, dpi=150, bbox_inches='tight')
     plt.close()
 
@@ -277,11 +279,13 @@ def main():
     print('Replacing -200 with NaN...')
     df = mark_missing(df)
 
-    # 缺失热图（在填充之前生成，展示真实缺失模式）
+    # 缺失值可视化（在填充之前生成，展示真实缺失模式）
     missing_summary = save_missing_summary(df, MISSING_SUMMARY_OUT)
     print('Missing summary:')
     print(missing_summary)
-    plot_missing_heatmap(df, picture_dir / 'missing_heatmap.png')
+    plot_missing_bar(df, picture_dir / 'missing_bar.png')
+    print(f'Missing bar saved to {picture_dir / "missing_bar.png"}')
+    plot_missing_monthly_heatmap(df, picture_dir / 'missing_heatmap.png')
     print(f'Missing heatmap saved to {picture_dir / "missing_heatmap.png"}')
 
     print('Filling missing values...')
